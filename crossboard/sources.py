@@ -819,7 +819,7 @@ def fetch_mcp_jobs(source, lane, config, now):
         from mcp import Client
         jobs=[]; errors=[]
         try:
-            async with Client(endpoint) as client:
+            async with Client(endpoint, mode=source_cfg.get("protocol_mode","auto")) as client:
                 listing=await client.list_tools()
                 tool=next((t for t in listing.tools if t.name=="search_jobs"),None)
                 if tool is None:
