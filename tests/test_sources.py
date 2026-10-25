@@ -182,6 +182,43 @@ class SourceParserTests(unittest.TestCase):
         self.assertEqual(len(calls),2)
         self.assertTrue(any("page=1" in u for u in calls))
 
+    def test_mcp_search_args_use_remote_us_and_one_day_when_supported(self):
+        cfg=self.config()
+        schema={"properties":{
+            "keyword":{"type":"string"},
+            "country":{"type":"string"},
+            "workplace_types":{"type":"array","items":{"type":"string","enum":["Remote","Hybrid","On-Site"]}},
+            "posted_date":{"type":"string","enum":["ONE","THREE","SEVEN"]},
+            "jobs_per_page":{"type":"integer","maximum":100},
+            "page_number":{"type":"integer"},
+        }}
+        args=sources._mcp_search_args("dice","Data Engineer",schema,cfg)
+        self.assertEqual(args["keyword"],"Data Engineer")
+        self.assertEqual(args["country"],"US")
+        self.assertEqual(args["workplace_types"],["Remote"])
+        self.assertEqual(args["posted_date"],"ONE")
+        self.assertEqual(args["jobs_per_page"],10)
+        self.assertEqual(args["page_number"],1)
+
+    def test_mcp_job_mapping_keeps_board_date_as_third_party_semantics(self):
+        record={
+            "jobId":"d-123",
+            "title":"Data Engineer II",
+            "companyName":"Acme",
+            "jobLocation":"Remote, United States",
+            "workplaceTypes":["Remote"],
+            "postedDate":"2026-09-23T10:00:00Z",
+            "employmentType":"FULLTIME",
+            "summary":"AWS SQL ETL pipelines",
+            "detailsPageUrl":"https://www.dice.com/job-detail/d-123",
+        }
+        job=sources._mcp_job_from_record("dice",record,"2026-09-23T12:00:00+00:00")
+        self.assertEqual(job["source"],"dice")
+        self.assertEqual(job["source_job_id"],"d-123")
+        self.assertEqual(job["workplace_type"],"remote")
+        self.assertEqual(job["source_time_semantics"],"dice_board_posted_date")
+        self.assertEqual(job["apply_url"],"https://www.dice.com/job-detail/d-123")
+
     def test_remotelanders_is_removed_from_production_config(self):
         config=json.loads(Path("tests/fixtures/config.json").read_text(encoding="utf-8"))
         self.assertNotIn("remotelanders",config["sources"])
