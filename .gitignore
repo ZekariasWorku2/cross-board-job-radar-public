@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+config.json
+profiles/
+state/
+output/
+private-data/
+dry-run-results/
+*.log
+*.token
+*.pem

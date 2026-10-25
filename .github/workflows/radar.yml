@@ -1,0 +1,85 @@
+name: Cross-Board Job Radar (Private Data)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-board-job-radar-production
+  cancel-in-progress: false
+
+jobs:
+  radar:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout public program
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout restricted private data
+        uses: actions/checkout@v4
+        with:
+          repository: ZekariasWorku2/cross-board-job-radar-data
+          token: ${{ secrets.JOB_RADAR_DATA_TOKEN }}
+          path: private-data
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Verify code in isolation, without private data
+        env:
+          JOB_RADAR_PROFILE_PATH: tests/fixtures/resume_profile.json
+        run: |
+          python -m compileall -q run.py crossboard tests
+          python -m unittest discover -s tests -q
+      - name: Restore private configuration and history
+        run: |
+          set -euo pipefail
+          test -s private-data/config.json
+          test -s private-data/profiles/data_engineer.json
+          test -s private-data/state/state.json
+          mkdir -p profiles state output private-data/output
+          cp private-data/config.json config.json
+          cp private-data/profiles/data_engineer.json profiles/data_engineer.json
+          cp private-data/state/state.json state/state.json
+      - name: Scan and notify; log details privately
+        env:
+          GMAIL_SMTP_USERNAME: ${{ secrets.GMAIL_SMTP_USERNAME }}
+          GMAIL_SMTP_APP_PASSWORD: ${{ secrets.GMAIL_SMTP_APP_PASSWORD }}
+          JOB_ALERT_RECIPIENT: ${{ secrets.JOB_ALERT_RECIPIENT }}
+        run: |
+          set +e
+          python run.py --notify > private-data/output/last-run.log 2>&1
+          status=$?
+          set -e
+          echo "$status" > private-data/output/last-exit-code.txt
+          if test -s state/state.json; then cp state/state.json private-data/state/state.json; fi
+          if test -s output/latest.json; then cp output/latest.json private-data/output/latest.json; fi
+      - name: Persist private state, results and diagnostics
+        if: always()
+        run: |
+          set -euo pipefail
+          if test -d private-data/.git; then
+            git -C private-data config user.name 'cross-board-job-radar[bot]'
+            git -C private-data config user.email 'cross-board-job-radar@users.noreply.github.com'
+            git -C private-data add state output
+            if ! git -C private-data diff --cached --quiet; then
+              git -C private-data commit -m 'chore: update private radar history and results [skip ci]'
+              git -C private-data pull --rebase origin main
+              git -C private-data push origin HEAD:main
+            fi
+          fi
+      - name: Report status without exposing private job results
+        run: |
+          set -euo pipefail
+          test -s private-data/output/last-exit-code.txt || { echo 'Scan did not execute. Check private data access.'; exit 1; }
+          result="$(cat private-data/output/last-exit-code.txt)"
+          test "$result" = 0 || { echo 'Scan or email delivery failed. Inspect output/last-run.log in the private data repository.'; exit 1; }
+          echo 'Scan completed. Results and history saved privately.'

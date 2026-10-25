@@ -1,0 +1,32 @@
+{
+  "source": "Synthetic unit-test fixture, not an individual's resume",
+  "skills": {
+    "aws_cloud": [
+      "aws",
+      "aws glue",
+      "amazon s3",
+      "redshift"
+    ],
+    "sql_server": [
+      "sql server",
+      "t-sql"
+    ],
+    "data_pipelines": [
+      "etl",
+      "data pipelines",
+      "data warehousing"
+    ],
+    "spark_python": [
+      "pyspark",
+      "python"
+    ],
+    "warehousing": [
+      "data warehouse",
+      "dimensional modeling"
+    ]
+  },
+  "experience_evidence": [
+    "Built synthetic AWS Glue ETL data pipelines using PySpark and SQL Server, landed data in S3 and Redshift.",
+    "Developed synthetic SQL Server stored procedures and SSIS ETL processes for data warehousing."
+  ]
+}

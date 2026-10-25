@@ -1,0 +1,10 @@
+{
+  "timezone": "America/New_York",
+  "recipient": "",
+  "notes": "Illustrative non-personal configuration. Actual production configuration is in the private data repository.",
+  "freshness": {"max_age_hours": 24},
+  "sources": {"linkedin": {"enabled": true, "mode": "linkedin_guest"},
+              "indeed": {"enabled": true, "mode": "jobspy"}},
+  "lanes": {"data_engineer": {"enabled": true, "queries": ["Data Engineer"]},
+            "sql_developer": {"enabled": true, "queries": ["SQL Developer"]}}
+}

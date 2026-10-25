@@ -1,0 +1,6 @@
+requests>=2.32,<3
+beautifulsoup4>=4.12,<5
+python-dateutil>=2.9,<3
+pandas>=2.2,<3
+pydantic>=2.0,<3
+python-jobspy==1.4.1
