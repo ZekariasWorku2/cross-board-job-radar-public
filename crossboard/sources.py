@@ -795,48 +795,71 @@ def _mcp_result_values(result):
     return values
 
 
+def _flatten_exception(exc):
+    messages=[]
+    nested=getattr(exc,"exceptions",None)
+    if nested:
+        for child in nested:
+            messages.extend(_flatten_exception(child))
+    else:
+        messages.append(f"{type(exc).__name__}: {exc}")
+    return messages
+
+
 def fetch_mcp_jobs(source, lane, config, now):
     """Query an official unauthenticated MCP job-search server."""
     import asyncio
     endpoint=config["sources"][source]["endpoint"]
+    source_cfg=config["sources"][source]
     limit=int(config["search"].get("max_records_per_source_per_lane",50000))
+    queries=(source_cfg.get("queries") or {}).get(lane) or config["lanes"][lane]["queries"]
+    call_delay=float(source_cfg.get("request_delay_seconds",0))
 
     async def run():
         from mcp import Client
         jobs=[]; errors=[]
-        async with Client(endpoint) as client:
-            listing=await client.list_tools()
-            tool=next((t for t in listing.tools if t.name=="search_jobs"),None)
-            if tool is None:
-                raise RuntimeError(f"{source} MCP does not expose search_jobs")
-            schema=getattr(tool,"input_schema",None) or getattr(tool,"inputSchema",None) or {}
-            for query in config["lanes"][lane]["queries"]:
-                if len(jobs)>=limit:
-                    break
-                try:
-                    result=await client.call_tool("search_jobs",_mcp_search_args(source,query,schema,config))
-                    if getattr(result,"is_error",False):
-                        errors.append(f"{query}: MCP search_jobs returned an error")
-                        continue
-                    seen_payload=False
-                    for value in _mcp_result_values(result):
-                        seen_payload=True
-                        for record in _mcp_job_records(value):
-                            job=_mcp_job_from_record(source,record,now)
-                            if job:
-                                jobs.append(job)
-                                if len(jobs)>=limit:
-                                    break
-                    if not seen_payload:
-                        errors.append(f"{query}: MCP returned no machine-readable payload")
-                except Exception as exc:
-                    errors.append(f"{query}: {type(exc).__name__}: {exc}")
-        if not jobs and errors:
-            raise RuntimeError("; ".join(errors[:3]))
-        return _unique(jobs,limit)
+        try:
+            async with Client(endpoint) as client:
+                listing=await client.list_tools()
+                tool=next((t for t in listing.tools if t.name=="search_jobs"),None)
+                if tool is None:
+                    raise RuntimeError(f"{source} MCP does not expose search_jobs")
+                schema=getattr(tool,"input_schema",None) or getattr(tool,"inputSchema",None) or {}
+                for index,query in enumerate(queries):
+                    if len(jobs)>=limit:
+                        break
+                    if index and call_delay:
+                        await asyncio.sleep(call_delay)
+                    try:
+                        result=await client.call_tool("search_jobs",_mcp_search_args(source,query,schema,config))
+                        if getattr(result,"is_error",False):
+                            errors.append(f"{query}: MCP search_jobs returned an error")
+                            continue
+                        seen_payload=False
+                        for value in _mcp_result_values(result):
+                            seen_payload=True
+                            for record in _mcp_job_records(value):
+                                job=_mcp_job_from_record(source,record,now)
+                                if job:
+                                    jobs.append(job)
+                                    if len(jobs)>=limit:
+                                        break
+                        if not seen_payload:
+                            errors.append(f"{query}: MCP returned no machine-readable payload")
+                    except Exception as exc:
+                        errors.extend(f"{query}: {m}" for m in _flatten_exception(exc))
+        except Exception as exc:
+            errors.extend(_flatten_exception(exc))
+
+        # A remote MCP server may close the stream after rate limiting even after
+        # returning valid earlier searches. Preserve those records rather than
+        # converting a partial successful scan into a total source failure.
+        unique=_unique(jobs,limit)
+        if not unique and errors:
+            raise RuntimeError("; ".join(errors[:4]))
+        return unique
 
     return asyncio.run(run())
-
 
 def fetch_source(source, lane, config, now, diagnostics=None):
     mode = config["sources"][source]["mode"]
