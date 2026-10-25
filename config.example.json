@@ -22,7 +22,19 @@
     "ziprecruiter": {
       "enabled": true,
       "mode": "mcp_job_search",
-      "endpoint": "https://api.ziprecruiter.com/mcp"
+      "endpoint": "https://api.ziprecruiter.com/mcp",
+      "request_delay_seconds": 1.5,
+      "queries": {
+        "data_engineer": [
+          "Data Engineer",
+          "AWS Data Engineer"
+        ],
+        "sql_developer": [
+          "SQL Developer",
+          "SQL Server Developer",
+          "ETL Developer"
+        ]
+      }
     }
   },
   "lanes": {
