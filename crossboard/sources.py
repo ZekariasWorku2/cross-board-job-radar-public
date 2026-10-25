@@ -624,12 +624,228 @@ def fetch_ayla(lane, config, now):
     return _unique(jobs, max_records)
 
 
+
+def _mcp_prop(schema, names):
+    props=(schema or {}).get("properties") or {}
+    for name in names:
+        if name in props:
+            return name
+    lowered={str(k).lower():k for k in props}
+    for name in names:
+        if name.lower() in lowered:
+            return lowered[name.lower()]
+    return None
+
+
+def _mcp_assign(args, schema, names, value):
+    name=_mcp_prop(schema,names)
+    if name:
+        meta=((schema or {}).get("properties") or {}).get(name) or {}
+        if "enum" in meta and value not in meta["enum"]:
+            lower={str(v).lower():v for v in meta["enum"]}
+            if str(value).lower() in lower:
+                value=lower[str(value).lower()]
+            else:
+                return
+        args[name]=value
+
+
+def _mcp_search_args(source, query, schema, config):
+    """Build only arguments the remote MCP tool explicitly advertises."""
+    args={}
+    _mcp_assign(args,schema,("keyword","query","search_term","q"),query)
+    _mcp_assign(args,schema,("country","country_code"),"US")
+
+    # Prefer an explicit workplace filter over putting "remote" into free text.
+    props=(schema or {}).get("properties") or {}
+    workplace=_mcp_prop(schema,("workplace_types","workplace_type","work_arrangement","workplace"))
+    if workplace:
+        meta=props.get(workplace) or {}
+        if meta.get("type")=="array":
+            item_enum=((meta.get("items") or {}).get("enum") or [])
+            if item_enum:
+                choice=next((v for v in item_enum if str(v).lower()=="remote"),None)
+                if choice is not None:
+                    args[workplace]=[choice]
+            else:
+                args[workplace]=["Remote"]
+        else:
+            enum=meta.get("enum") or []
+            choice=next((v for v in enum if str(v).lower()=="remote"),None) if enum else "Remote"
+            if choice is not None:
+                args[workplace]=choice
+    else:
+        remote_name=_mcp_prop(schema,("remote_only","is_remote","remote"))
+        if remote_name:
+            meta=props.get(remote_name) or {}
+            args[remote_name]=True if meta.get("type") in ("boolean",None) else "remote"
+        else:
+            _mcp_assign(args,schema,("location",),"Remote")
+
+    # Board recency is discovery evidence only. Employer-origin freshness remains
+    # governed by crossboard.freshness.assess().
+    posted=_mcp_prop(schema,("posted_date","date_posted"))
+    if posted:
+        meta=props.get(posted) or {}
+        enum=meta.get("enum") or []
+        if enum:
+            preferred=("ONE","1","ONE_DAY","PAST_24_HOURS","24_HOURS","1d")
+            choice=next((v for p in preferred for v in enum if str(v).upper()==p.upper()),None)
+            if choice is not None:
+                args[posted]=choice
+        elif source=="dice":
+            args[posted]="ONE"
+    for names in (("posted_within_days","days_ago","recency_days","days_since_posted"),
+                  ("hours_old","posted_within_hours")):
+        key=_mcp_prop(schema,names)
+        if key:
+            args[key]=1 if "days" in key or "ago" in key else 24
+            break
+
+    # Stay within the provider-advertised maximum. One page per title query keeps
+    # the 30-minute production cadence respectful and predictable.
+    limit_name=_mcp_prop(schema,("jobs_per_page","limit","max_results","page_size","count"))
+    if limit_name:
+        meta=props.get(limit_name) or {}
+        maximum=meta.get("maximum")
+        desired=min(int(config["search"].get("max_records_per_query",100)),100)
+        if maximum is not None:
+            desired=min(desired,int(maximum))
+        args[limit_name]=max(1,desired)
+    page_name=_mcp_prop(schema,("page_number","page"))
+    if page_name:
+        args[page_name]=1
+    offset_name=_mcp_prop(schema,("offset",))
+    if offset_name:
+        args[offset_name]=0
+    return args
+
+
+def _mcp_scalar(record, names):
+    for name in names:
+        value=record.get(name)
+        if value not in (None,"",[],{}):
+            return value
+    return None
+
+
+def _mcp_job_records(value):
+    """Yield probable job dictionaries from structured or text MCP results."""
+    if isinstance(value,dict):
+        keys={str(k).lower() for k in value}
+        title_keys={"title","jobtitle","job_title","name"}
+        company_keys={"company","companyname","company_name","employer","employername","employer_name"}
+        url_keys={"detailspageurl","applyurl","apply_url","joburl","job_url","url","link"}
+        if keys & title_keys and (keys & company_keys or keys & url_keys):
+            yield value
+        for child in value.values():
+            yield from _mcp_job_records(child)
+    elif isinstance(value,list):
+        for child in value:
+            yield from _mcp_job_records(child)
+
+
+def _mcp_job_from_record(source, record, now):
+    title=_mcp_scalar(record,("title","jobTitle","job_title","name"))
+    if not title:
+        return None
+    company=_mcp_scalar(record,("companyName","company_name","company","employerName","employer_name","employer"))
+    location=_mcp_scalar(record,("jobLocation","job_location","location","locationName","location_name"))
+    if isinstance(location,dict):
+        location=", ".join(str(location.get(k) or "") for k in ("city","state","country") if location.get(k)) or str(location.get("name") or "")
+    elif isinstance(location,list):
+        location=", ".join(str(x.get("name") if isinstance(x,dict) else x) for x in location if x)
+    description=_mcp_scalar(record,("description","jobDescription","job_description","summary","snippet")) or ""
+    url=_mcp_scalar(record,("detailsPageUrl","details_page_url","applyUrl","apply_url","jobUrl","job_url","url","link"))
+    apply_url=_mcp_scalar(record,("applyUrl","apply_url","applicationUrl","application_url")) or url
+    posted=_mcp_scalar(record,("postedDate","posted_date","datePosted","date_posted","publicationDate","publication_date","postedAt","posted_at"))
+    job_id=_mcp_scalar(record,("id","jobId","job_id","jobID","requisitionId","requisition_id"))
+    employment=_mcp_scalar(record,("employmentType","employment_type","jobType","job_type")) or ""
+    salary=_mcp_scalar(record,("salary","salaryText","salary_text","compensation")) or ""
+    if isinstance(salary,(dict,list)):
+        import json
+        salary=json.dumps(salary,sort_keys=True)
+
+    workplace=_mcp_scalar(record,("workplaceTypes","workplace_types","workplaceType","workplace_type","workArrangement","work_arrangement"))
+    workplace_text=" ".join(map(str,workplace)) if isinstance(workplace,list) else str(workplace or "")
+    remote=("remote" in clean(workplace_text+" "+str(location or "")))
+    return _make_job(
+        source,job_id or "",str(title),str(company or ""),str(location or "Remote"),
+        str(url or apply_url or ""),now,apply_url=str(apply_url or url or ""),
+        posted=posted,description=str(description),employment_type=str(employment),
+        salary=str(salary),workplace_type="remote" if remote else "unknown",
+        time_semantics=f"{source}_board_posted_date",
+    )
+
+
+def _mcp_result_values(result):
+    values=[]
+    structured=getattr(result,"structured_content",None)
+    if structured not in (None,{},[]):
+        values.append(structured)
+    for block in getattr(result,"content",[]) or []:
+        text=getattr(block,"text",None)
+        if not text:
+            continue
+        try:
+            import json
+            values.append(json.loads(text))
+        except Exception:
+            continue
+    return values
+
+
+def fetch_mcp_jobs(source, lane, config, now):
+    """Query an official unauthenticated MCP job-search server."""
+    import asyncio
+    endpoint=config["sources"][source]["endpoint"]
+    limit=int(config["search"].get("max_records_per_source_per_lane",50000))
+
+    async def run():
+        from mcp import Client
+        jobs=[]; errors=[]
+        async with Client(endpoint) as client:
+            listing=await client.list_tools()
+            tool=next((t for t in listing.tools if t.name=="search_jobs"),None)
+            if tool is None:
+                raise RuntimeError(f"{source} MCP does not expose search_jobs")
+            schema=getattr(tool,"input_schema",None) or getattr(tool,"inputSchema",None) or {}
+            for query in config["lanes"][lane]["queries"]:
+                if len(jobs)>=limit:
+                    break
+                try:
+                    result=await client.call_tool("search_jobs",_mcp_search_args(source,query,schema,config))
+                    if getattr(result,"is_error",False):
+                        errors.append(f"{query}: MCP search_jobs returned an error")
+                        continue
+                    seen_payload=False
+                    for value in _mcp_result_values(result):
+                        seen_payload=True
+                        for record in _mcp_job_records(value):
+                            job=_mcp_job_from_record(source,record,now)
+                            if job:
+                                jobs.append(job)
+                                if len(jobs)>=limit:
+                                    break
+                    if not seen_payload:
+                        errors.append(f"{query}: MCP returned no machine-readable payload")
+                except Exception as exc:
+                    errors.append(f"{query}: {type(exc).__name__}: {exc}")
+        if not jobs and errors:
+            raise RuntimeError("; ".join(errors[:3]))
+        return _unique(jobs,limit)
+
+    return asyncio.run(run())
+
+
 def fetch_source(source, lane, config, now, diagnostics=None):
     mode = config["sources"][source]["mode"]
     if mode == "linkedin_guest":
         return fetch_linkedin_guest(lane, config, now)
     if mode == "jobspy":
         return fetch_jobspy(source, lane, config, now, diagnostics=diagnostics)
+    if mode == "mcp_job_search":
+        return fetch_mcp_jobs(source, lane, config, now)
     if mode == "builtin":
         return fetch_builtin(lane, config, now)
     if mode == "remoteok_api":
