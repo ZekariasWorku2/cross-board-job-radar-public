@@ -34,7 +34,8 @@
           "SQL Server Developer",
           "ETL Developer"
         ]
-      }
+      },
+      "protocol_mode": "legacy"
     }
   },
   "lanes": {
