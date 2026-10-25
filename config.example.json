@@ -20,7 +20,7 @@
       "endpoint": "https://mcp.dice.com/mcp"
     },
     "ziprecruiter": {
-      "enabled": true,
+      "enabled": false,
       "mode": "mcp_job_search",
       "endpoint": "https://api.ziprecruiter.com/mcp",
       "request_delay_seconds": 1.5,
