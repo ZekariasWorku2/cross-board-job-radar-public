@@ -2,7 +2,7 @@ name: Cross-Board Job Radar (Private Data)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '6 1,7,13,19 * * *'
+    - cron: '17,47 * * * *'
 
 permissions:
   contents: read
