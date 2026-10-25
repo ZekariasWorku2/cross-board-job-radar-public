@@ -1,0 +1,75 @@
+name: ZipRecruiter MCP Diagnostic
+on:
+  push:
+    branches: [main]
+    paths: ['.github/zip-debug-trigger']
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'mcp>=2.0,<3'
+      - name: Probe one ZipRecruiter MCP search
+        run: |
+          python - <<'PY'
+          import asyncio, json, traceback
+          from mcp import Client
+
+          def build(schema):
+              props=(schema or {}).get("properties") or {}
+              args={}
+              for name in ("keyword","query","search_term","q"):
+                  if name in props:
+                      args[name]="Data Engineer"
+                      break
+              if "country" in props: args["country"]="US"
+              if "country_code" in props: args["country_code"]="US"
+              if "workplace_types" in props: args["workplace_types"]=["Remote"]
+              elif "workplace_type" in props: args["workplace_type"]="Remote"
+              elif "remote" in props: args["remote"]=True
+              elif "remote_only" in props: args["remote_only"]=True
+              elif "location" in props: args["location"]="Remote"
+              if "posted_within_days" in props: args["posted_within_days"]=1
+              if "posted_date" in props:
+                  enum=(props["posted_date"] or {}).get("enum") or []
+                  args["posted_date"]="ONE" if not enum or "ONE" in enum else enum[0]
+              if "limit" in props: args["limit"]=min(5,int((props["limit"] or {}).get("maximum",5)))
+              if "max_results" in props: args["max_results"]=min(5,int((props["max_results"] or {}).get("maximum",5)))
+              if "offset" in props: args["offset"]=0
+              return args
+
+          async def main():
+              try:
+                  async with Client("https://api.ziprecruiter.com/mcp", mode="legacy") as client:
+                      print("protocol",client.protocol_version)
+                      listing=await client.list_tools()
+                      tool=next(t for t in listing.tools if t.name=="search_jobs")
+                      schema=getattr(tool,"input_schema",None) or {}
+                      print("schema",json.dumps(schema,sort_keys=True))
+                      args=build(schema)
+                      print("args",json.dumps(args,sort_keys=True))
+                      result=await client.call_tool("search_jobs",args)
+                      print("is_error",getattr(result,"is_error",None))
+                      print("structured",json.dumps(getattr(result,"structured_content",None),default=str)[:5000])
+                      for block in getattr(result,"content",[]) or []:
+                          text=getattr(block,"text",None)
+                          if text:
+                              print("text",text[:5000])
+              except Exception as exc:
+                  print("exception_type",type(exc).__name__)
+                  print("exception_repr",repr(exc))
+                  for attr in ("code","message","data","error"):
+                      if hasattr(exc,attr):
+                          print(attr,repr(getattr(exc,attr)))
+                  traceback.print_exc()
+                  raise
+
+          asyncio.run(main())
+          PY
