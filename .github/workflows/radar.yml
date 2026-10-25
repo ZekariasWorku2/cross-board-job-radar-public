@@ -3,6 +3,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '17,47 * * * *'
+  push:
+    branches: [main]
+    paths: ['.github/source-smoke-trigger']
 
 permissions:
   contents: read
