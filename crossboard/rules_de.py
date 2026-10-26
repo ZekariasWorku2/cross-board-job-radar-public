@@ -62,7 +62,7 @@ def clearance_required(text):
         kind=r"(?:secret|top\s+secret|ts\s*/?\s*sci|public\s+trust|security\s+clearance)"
         if not re.search(kind,clause): continue
         if re.search(r"\b(?:no|not)\b.{0,25}\b(?:clearance|required)\b|clearance\s+is\s+not\s+required",clause): continue
-        if any(x in clause for x in OBTAINABLE) and not re.search(r"\b(?:active|current)\b.{0,45}"+kind,clause): continue
+        if any(x in clause for x in OBTAINABLE): return True
         if re.search(r"\b(?:active|current)\b.{0,45}"+kind,clause) or re.search(r"must (?:have|hold|possess)|required|with security clearance",clause): return True
     return False
 
@@ -77,7 +77,7 @@ def validate(job,settings=None):
     if not reason and job.get("page_closed_confirmed"): reason="Application is confirmed closed"
     elif not reason and job.get("page_verified_live") is not True:
         review_reasons.append("Live application page could not be verified")
-    if not reason and clearance_required(text): reason="Requires an active/current security clearance or Public Trust"
+    if not reason and clearance_required(text): reason="Requires a security clearance/Public Trust or eligibility/ability to obtain one"
     years=_years(text); max_years=int(settings.get("max_required_years",6))
     if not reason and years is not None and years>max_years: reason=f"Explicit minimum experience requirement is {years} years"
     travel=_travel(text); max_travel=int(settings.get("max_travel_percent",20))
