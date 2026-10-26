@@ -44,7 +44,7 @@ def clearance_required(text):
         if not re.search(kind,clause): continue
         if re.search(r"\b(?:no|not)\b.{0,25}\b(?:clearance|required)\b|clearance\s+is\s+not\s+required",clause): continue
         if re.search(r"\b(?:active|current)\b.{0,45}"+kind,clause): return True
-        if re.search(r"ability to obtain|able to obtain|eligible to obtain|eligibility|can obtain|must be eligible",clause): continue
+        if re.search(r"ability to obtain|able to obtain|eligible to obtain|eligibility|can obtain|must be eligible",clause): return True
         if re.search(r"must (?:have|hold|possess)|required|with security clearance",clause): return True
     return False
 
@@ -64,7 +64,7 @@ def validate(job,settings=None):
     if not reason and job.get("page_closed_confirmed"):reason="Application is confirmed closed"
     elif not reason and job.get("page_verified_live") is not True:
         review_reasons.append("Live application page could not be verified")
-    if not reason and clearance_required(text):reason="Requires a current/active clearance or Public Trust"
+    if not reason and clearance_required(text):reason="Requires a security clearance/Public Trust or eligibility/ability to obtain one"
     if not reason and re.search(r"\.net|dotnet|full[- ]?stack|fullstack",clean(title)) and re.search(r"\bc#\b|asp\.net|\.net core|web api|entity framework|javascript|react|angular",description):reason="Role is primarily .NET/full-stack development rather than SQL database development"
     travel=_travel(text)
     if not reason and travel is not None and travel>int(settings.get("max_travel_percent",20)):reason=f"Requires substantial travel ({travel}%)"
