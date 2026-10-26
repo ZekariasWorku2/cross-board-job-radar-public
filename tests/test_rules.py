@@ -18,9 +18,15 @@ class DataEngineerRulesTests(unittest.TestCase):
         result=rules_de.validate(self.base(description="Data pipelines ETL SQL AWS data warehouse Python. Minimum 7 years experience."),{"max_required_years":6,"strong_score_threshold":78,"min_possible_alert_score":55,"max_travel_percent":20})
         self.assertEqual(result["validation_class"],"rejected")
 
-    def test_clearance_eligibility_allowed(self):
+    def test_clearance_eligibility_rejected(self):
         result=rules_de.validate(self.base(description="Build data pipelines with SQL ETL AWS data warehouse Python. Must be eligible to obtain a Secret clearance. 4 years experience."),{"max_required_years":6,"strong_score_threshold":78,"min_possible_alert_score":55,"max_travel_percent":20})
-        self.assertNotEqual(result["validation_reject_reason"],"Requires an active/current security clearance or Public Trust")
+        self.assertEqual(result["validation_class"],"rejected")
+        self.assertEqual(result["validation_reject_reason"],"Requires a security clearance/Public Trust or eligibility/ability to obtain one")
+
+
+    def test_no_clearance_required_allowed(self):
+        result=rules_de.validate(self.base(description="Build AWS SQL ETL data pipelines. No security clearance is required. 4 years experience."),{"max_required_years":6,"strong_score_threshold":78,"min_possible_alert_score":55,"max_travel_percent":20})
+        self.assertNotEqual(result["validation_reject_reason"],"Requires a security clearance/Public Trust or eligibility/ability to obtain one")
 
     def test_active_clearance_rejected(self):
         result=rules_de.validate(self.base(description="Build ETL pipelines. Active Secret clearance required."),{"max_required_years":6,"strong_score_threshold":78,"min_possible_alert_score":55,"max_travel_percent":20})
@@ -105,8 +111,8 @@ class SqlRulesTests(unittest.TestCase):
     def test_oracle_primary_rejected_for_adjacent_title(self):
         r=rules_sql.validate(self.base(title="Database Developer",description="Remote database developer using Oracle PL/SQL, Informatica, PostgreSQL and Power BI for enterprise systems."),self.settings()); self.assertEqual(r["validation_class"],"rejected")
 
-    def test_ability_to_obtain_allowed(self):
-        r=rules_sql.validate(self.base(description=self.base()["description"]+" Must be eligible to obtain Public Trust."),self.settings()); self.assertNotEqual(r["validation_reject_reason"],"Requires a current/active clearance or Public Trust")
+    def test_ability_to_obtain_rejected(self):
+        r=rules_sql.validate(self.base(description=self.base()["description"]+" Must be eligible to obtain Public Trust."),self.settings()); self.assertEqual(r["validation_class"],"rejected"); self.assertEqual(r["validation_reject_reason"],"Requires a security clearance/Public Trust or eligibility/ability to obtain one")
 
     def test_current_public_trust_rejected(self):
         r=rules_sql.validate(self.base(description=self.base()["description"]+" Current Public Trust required."),self.settings()); self.assertEqual(r["validation_class"],"rejected")
