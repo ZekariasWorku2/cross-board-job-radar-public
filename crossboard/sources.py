@@ -907,6 +907,70 @@ def _employer_application_link(soup, current_url):
             return href
     return None
 
+
+def _explicit_workplace_from_html(soup):
+    """Extract a posting's displayed workplace badge from common board layouts.
+
+    Only labeled fields and short standalone header chips count. A random
+    mention of "hybrid cloud" in the job description is not a workplace badge.
+    """
+    def badge(value):
+        s=clean(value)
+        for prefix in ("workplace type", "workplace", "work arrangement",
+                       "work model", "work setting", "location type"):
+            if s.startswith(prefix+" "):
+                s=s[len(prefix):].strip()
+                break
+        s=re.sub(r"^(?:is|type|arrangement)\s+","",s)
+        if re.fullmatch(r"(?:hybrid|on[- ]?site|onsite|in[- ]office|remote)(?: work| role| position)?",s):
+            if s.startswith("hybrid"): return "hybrid"
+            if s.startswith(("on-site","on site","onsite","in-office","in office")):
+                return "on-site"
+            return "remote"
+        return None
+
+    # Explicit schema fields on an individual JobPosting.
+    for node in _jsonld_nodes(soup):
+        if not isinstance(node,dict): continue
+        types=str(node.get("@type") or "").lower()
+        if "jobposting" not in types: continue
+        for field in ("workplaceType","workplace_type","workArrangement","workModel","jobLocationType"):
+            label=badge(node.get(field))
+            if label: return label
+        if str(node.get("jobLocationType") or "").upper()=="TELECOMMUTE":
+            return "remote"
+
+    # Metadata badges (LinkedIn public/guest and other ATS/job boards).
+    selectors=(
+        '[data-test-workplace-type]',
+        '[data-testid*="workplace"]',
+        '[class*="workplace-type"]',
+        '[class*="workplaceType"]',
+        '[class*="workplace_type"]',
+        '[class*="work-arrangement"]',
+        '[class*="workArrangement"]',
+        '[class*="topcard__flavor"]',
+        '[class*="top-card-layout__second-subline"]',
+        '[class*="job-criteria-text"]',
+        '[class*="job-details-jobs-unified-top-card__primary-description"]',
+        '[itemprop="jobLocationType"]',
+    )
+    for selector in selectors:
+        for element in soup.select(selector)[:20]:
+            label=badge(element.get_text(" ",strip=True))
+            if label: return label
+            for child in element.select("span, li")[:15]:
+                label=badge(child.get_text(" ",strip=True))
+                if label: return label
+
+    # On some job boards the label is an otherwise anonymous short chip in
+    # the posting header; never scan arbitrary description paragraphs.
+    for header in soup.select('header, [class*="top-card"], [class*="topcard"], [class*="job-header"]')[:8]:
+        for element in header.select("span, li")[:70]:
+            label=badge(element.get_text(" ",strip=True))
+            if label:return label
+    return None
+
 def enrich_page(job, config):
     """Verify open status and collect genuine employer/ATS publication evidence."""
     from .freshness import employer_page
@@ -919,6 +983,9 @@ def enrich_page(job, config):
     def collect_employer_page(response):
         html_text=response.text[:2_000_000]
         soup=BeautifulSoup(html_text,"html.parser")
+        displayed_workplace=_explicit_workplace_from_html(soup)
+        if displayed_workplace:
+            out["page_workplace_type"]=displayed_workplace
         out["page_source_url"]=canonical_url(response.url)
         out["page_employer_verified"]=employer_page(response.url)
         text=soup.get_text(" ",strip=True)
@@ -932,7 +999,8 @@ def enrich_page(job, config):
             candidate=_job_from_jsonld(posting,job.get("source") or "page",response.url,
                     job.get("retrieved_at") or datetime.now(timezone.utc).isoformat())
             for k in ("description","location","workplace_type"):
-                if candidate.get(k):out["page_"+k]=candidate[k]
+                if candidate.get(k) and not (k=="workplace_type" and displayed_workplace):
+                    out["page_"+k]=candidate[k]
             if candidate.get("employment_type"):out["employment_type"]=candidate["employment_type"]
             ident=posting.get("identifier")
             req=ident.get("value") if isinstance(ident,dict) else ident
