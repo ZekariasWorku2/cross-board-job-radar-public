@@ -110,6 +110,42 @@ def _virginia_excluded(text):
     return False
 
 
+
+def onsite_hybrid_rejection(job):
+    """Explicit onsite/hybrid evidence from any board or verified page is a hard reject."""
+    # Preserve meaning from structured data rather than trusting search filters.
+    for key in ("workplace_type","page_workplace_type","work_arrangement",
+                "page_work_arrangement","job_location_type","page_job_location_type"):
+        value=clean(job.get(key))
+        if not value:
+            continue
+        if value in BAD_WORKPLACE_VALUES or re.match(
+                r"^(?:hybrid|on[- ]?site|onsite|in[- ]office|office)(?:\b|[ /:,-])",value):
+            return "Employer or board metadata explicitly indicates hybrid/on-site work"
+        if re.search(r"\b(?:workplace|work arrangement|work model)\s*(?:type|is)?\s*"
+                     r"(?:[:=-]\s*|\bis\s+)(?:hybrid|on[- ]?site|onsite|in[- ]office)\b",value):
+            return "Employer or board metadata explicitly indicates hybrid/on-site work"
+
+    # Location badges are often rendered as "Hybrid - Philadelphia, PA" or
+    # "On-site | New York"; they are stronger evidence than a search filter.
+    for key in ("location","page_location"):
+        location=clean(job.get(key))
+        if re.search(r"^(?:hybrid|on[- ]?site|onsite|in[- ]office)\b",location):
+            return "Posting location explicitly indicates hybrid/on-site work"
+
+    # Descriptions must explicitly describe the work arrangement. Do not
+    # reject unrelated terms such as "hybrid cloud architecture".
+    text=clean(" ".join(str(job.get(k) or "") for k in
+        ("description","page_description","location","page_location")))
+    if _has(OFFICE_PATTERNS,text):
+        return "Job description explicitly requires hybrid/on-site attendance"
+    if re.search(
+            r"\b(?:workplace\s+type|work\s+arrangement|work\s+model|work\s+setting|"
+            r"work\s+location|location\s+type)\s*(?:is|:|-)?\s*"
+            r"(?:hybrid|on[- ]?site|onsite|in[- ]office)\b",text):
+        return "Job description explicitly indicates hybrid/on-site work"
+    return None
+
 def remote_status(job):
     """'reject' for explicit location/work-arrangement conflicts; 'review' for unknowns."""
     board_location=clean(job.get("location"))
@@ -122,10 +158,9 @@ def remote_status(job):
     page_text=clean(" ".join(x for x in (page_location,page_description) if x))
     board_text=clean(" ".join(x for x in (board_location,board_description) if x))
     all_text=clean(" ".join((board_text,page_text)))
-    if page_workplace in BAD_WORKPLACE_VALUES or board_workplace in BAD_WORKPLACE_VALUES:
-        return "reject","Employer or board metadata explicitly indicates hybrid/on-site work"
-    if _has(OFFICE_PATTERNS,all_text):
-        return "reject","Job description explicitly requires hybrid/on-site attendance"
+    workplace_reject=onsite_hybrid_rejection(job)
+    if workplace_reject:
+        return "reject",workplace_reject
     location=page_location or board_location
     if _explicit_non_us(location):
         return "reject","Posting location is outside the United States"
