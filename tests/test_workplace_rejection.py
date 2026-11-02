@@ -101,6 +101,22 @@ class WorkplaceHardRejectionTests(unittest.TestCase):
         self.assertFalse(result["lanes"]["data_engineer"]["manual_review"])
         self.assertFalse(result["lanes"]["data_engineer"]["qualifying"])
 
+    def test_structured_source_value_is_not_normalized_to_unknown(self):
+        from crossboard.sources import _workplace_from_metadata, _mcp_job_from_record
+        self.assertEqual(_workplace_from_metadata(["Remote","Hybrid"]),"hybrid")
+        self.assertEqual(_workplace_from_metadata("On-Site"),"on-site")
+        self.assertEqual(_workplace_from_metadata("Fully Remote"),"remote")
+        self.assertEqual(_workplace_from_metadata(None),"unknown")
+        item={
+            "jobId":"123","title":"Data Engineer II","companyName":"Sample",
+            "detailsPageUrl":"https://www.dice.com/job-detail/123",
+            "jobLocation":"Remote, United States",
+            "workplaceTypes":["Hybrid"],
+        }
+        record=_mcp_job_from_record("dice",item,NOW)
+        self.assertEqual(record["workplace_type"],"hybrid")
+        self.assertEqual(remote_status(record)[0],"reject")
+
     def test_unspecified_workplace_still_manual_review(self):
         listing=job(workplace_type="unknown",location="Oklahoma City, OK",
                     description="Build AWS Glue ETL data pipelines with SQL and Python.")
