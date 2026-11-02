@@ -15,6 +15,7 @@ from .dedupe import cluster_jobs, representative
 from .freshness import assess, source_might_be_recent
 from .model import parse_timestamp, utc_now_iso, normalize_company, normalize_title, token_set
 from .sources import fetch_source, enrich_page
+from .remote import onsite_hybrid_rejection
 
 LANE_RULES={"data_engineer":rules_de,"sql_developer":rules_sql}
 
@@ -277,6 +278,15 @@ def scan(config,state,now=None):
             rep.update(fresh); rep["canonical_id"]=cid
             validated=rules.validate(rep,settings)
             validated.update(fresh); validated["canonical_id"]=cid
+            # Fail closed if *any* discovered source in the deduplicated job
+            # cluster explicitly identifies on-site or hybrid attendance.
+            # The chosen representative may lack that source's metadata.
+            workplace_reject=next((reason for member in lane_cluster
+                if (reason:=onsite_hybrid_rejection(member))),None)
+            if workplace_reject:
+                validated["validation_class"]="rejected"
+                validated["validation_reject_reason"]=workplace_reject
+                validated["validation_alertable"]=False
             if fresh["freshness_status"]=="fresh": funnel["fresh_24h"]+=1
             else: funnel["stale_or_unknown"]+=1
             review_reasons=list(validated.get("validation_review_reasons") or [])
