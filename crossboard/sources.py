@@ -278,6 +278,25 @@ def fetch_linkedin_guest(lane, config, now):
     return _unique(results, max_records)
 
 
+
+def _workplace_from_metadata(value):
+    """Normalize explicit work arrangement from board/API structured fields."""
+    if value is None:
+        return "unknown"
+    if isinstance(value,dict):
+        value=" ".join(str(v) for v in value.values())
+    elif isinstance(value,(list,tuple,set)):
+        value=" ".join(str(v) for v in value)
+    value=clean(value)
+    if re.search(r"\bhybrid\b",value):
+        return "hybrid"
+    if re.search(r"\b(?:on[- ]?site|onsite|in[- ]office|in office)\b",value):
+        return "on-site"
+    if re.search(r"\bremote\b",value):
+        return "remote"
+    return "unknown"
+
+
 def _not_nan(value):
     if value is None:
         return None
@@ -328,6 +347,8 @@ def fetch_jobspy(source, lane, config, now, diagnostics=None):
             description=_not_nan(row.get("description")) or ""
             direct_url=_not_nan(row.get("job_url_direct")) or _not_nan(row.get("job_url"))
             board_url=_not_nan(row.get("job_url")) or direct_url
+            workplace=_workplace_from_metadata(_not_nan(row.get("workplace_type")) or
+                _not_nan(row.get("work_arrangement")) or _not_nan(row.get("remote_type")))
             remote=bool(_not_nan(row.get("is_remote"))) or "remote" in clean(location+" "+description)
             detail["after_remote"]+=1
             lo,hi=_not_nan(row.get("min_amount")),_not_nan(row.get("max_amount"))
@@ -336,7 +357,7 @@ def fetch_jobspy(source, lane, config, now, diagnostics=None):
             jobs.append(_make_job(source,_not_nan(row.get("id")) or "",title,company,
                 location or "Unknown",board_url,now,apply_url=direct_url,posted=posted,
                 description=description,employment_type=_not_nan(row.get("job_type")) or "",
-                salary=salary,workplace_type="remote" if remote else "unknown",
+                salary=salary,workplace_type=workplace if workplace!="unknown" else ("remote" if remote else "unknown"),
                 time_semantics="jobspy_date_posted"))
     unique=_unique(jobs,limit)
     if not unique and errors and diagnostics is None:
@@ -768,12 +789,13 @@ def _mcp_job_from_record(source, record, now):
 
     workplace=_mcp_scalar(record,("workplaceTypes","workplace_types","workplaceType","workplace_type","workArrangement","work_arrangement"))
     workplace_text=" ".join(map(str,workplace)) if isinstance(workplace,list) else str(workplace or "")
+    workplace_status=_workplace_from_metadata(workplace_text)
     remote=("remote" in clean(workplace_text+" "+str(location or "")))
     return _make_job(
         source,job_id or "",str(title),str(company or ""),str(location or "Remote"),
         str(url or apply_url or ""),now,apply_url=str(apply_url or url or ""),
         posted=posted,description=str(description),employment_type=str(employment),
-        salary=str(salary),workplace_type="remote" if remote else "unknown",
+        salary=str(salary),workplace_type=workplace_status if workplace_status!="unknown" else ("remote" if remote else "unknown"),
         time_semantics=f"{source}_board_posted_date",
     )
 
