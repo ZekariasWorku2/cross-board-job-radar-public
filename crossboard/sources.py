@@ -929,6 +929,7 @@ def _explicit_workplace_from_html(soup):
             return "remote"
         return None
 
+    remote_seen=False
     # Explicit schema fields on an individual JobPosting.
     for node in _jsonld_nodes(soup):
         if not isinstance(node,dict): continue
@@ -936,9 +937,10 @@ def _explicit_workplace_from_html(soup):
         if "jobposting" not in types: continue
         for field in ("workplaceType","workplace_type","workArrangement","workModel","jobLocationType"):
             label=badge(node.get(field))
-            if label: return label
+            if label in ("hybrid","on-site"): return label
+            if label=="remote": remote_seen=True
         if str(node.get("jobLocationType") or "").upper()=="TELECOMMUTE":
-            return "remote"
+            remote_seen=True
 
     # Metadata badges (LinkedIn public/guest and other ATS/job boards).
     selectors=(
@@ -958,18 +960,21 @@ def _explicit_workplace_from_html(soup):
     for selector in selectors:
         for element in soup.select(selector)[:20]:
             label=badge(element.get_text(" ",strip=True))
-            if label: return label
+            if label in ("hybrid","on-site"): return label
+            if label=="remote": remote_seen=True
             for child in element.select("span, li")[:15]:
                 label=badge(child.get_text(" ",strip=True))
-                if label: return label
+                if label in ("hybrid","on-site"): return label
+                if label=="remote": remote_seen=True
 
     # On some job boards the label is an otherwise anonymous short chip in
     # the posting header; never scan arbitrary description paragraphs.
     for header in soup.select('header, [class*="top-card"], [class*="topcard"], [class*="job-header"]')[:8]:
         for element in header.select("span, li")[:70]:
             label=badge(element.get_text(" ",strip=True))
-            if label:return label
-    return None
+            if label in ("hybrid","on-site"): return label
+            if label=="remote": remote_seen=True
+    return "remote" if remote_seen else None
 
 def enrich_page(job, config):
     """Verify open status and collect genuine employer/ATS publication evidence."""
