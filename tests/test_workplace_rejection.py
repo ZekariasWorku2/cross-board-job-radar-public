@@ -7,7 +7,7 @@ from crossboard import rules_de, rules_sql
 from crossboard.remote import remote_status
 from crossboard.sources import enrich_page
 from crossboard.engine import scan, pending_for_lane
-from tests.test_manual_review import config, job, history, NOW
+from test_manual_review import config, job, history, NOW
 
 
 class WorkplaceHardRejectionTests(unittest.TestCase):
